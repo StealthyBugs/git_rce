@@ -84,7 +84,7 @@ Pin to SHA: `pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527
 
 ---
 
-### BUG #4 — SEVERITY: HIGH
+### BUG #4 — SEVERITY: MEDIUM (Downgraded from HIGH after validation)
 
 **VULNERABILITY CLASS:** GitHub Actions Supply Chain (Mutable Branch Reference — 138-repo blast radius)
 **FILES:** 67 `postsubmit.yaml` + 71 `create-release.yml` across all ACK controllers
@@ -94,20 +94,15 @@ Pin to SHA: `pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527
 **DESCRIPTION:**
 All ACK controller repos reference reusable workflows from `aws-controllers-k8s/.github` pinned to `@main` instead of a SHA hash. Any push to the `.github` repo's main branch propagates to all controllers.
 
-**ATTACK SCENARIO:**
-1. Attacker gains write access to `aws-controllers-k8s/.github` main branch (via compromised maintainer, stolen token, etc.)
-2. Modifies reusable workflow to inject malicious code
-3. All 67+ controller postsubmit and 71 release workflows execute the injected code with `contents: write` permissions
-
-**CODE PATH TRACE:**
-`{controller}/.github/workflows/postsubmit.yaml` → `aws-controllers-k8s/.github/.github/workflows/reusable-postsubmit.yaml@main` (mutable) → runs with write permissions
+**WHY MEDIUM, NOT HIGH:**
+The `aws-controllers-k8s` is an AWS-owned GitHub org with org-level security controls. An external attacker cannot push to `main` without first compromising an AWS employee's credentials or the org itself — this is NOT registering an unclaimed resource. Notably, the reusable-postsubmit workflow already correctly SHA-pins `actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8`. The `@main` ref is a defense-in-depth gap (internal trust boundary), not an externally exploitable vulnerability.
 
 **REMEDIATION:**
 Pin all reusable workflow references to a specific commit SHA.
 
 ---
 
-### BUG #5 — SEVERITY: HIGH
+### BUG #5 — SEVERITY: MEDIUM (Downgraded from HIGH after validation)
 
 **VULNERABILITY CLASS:** GitHub Actions Supply Chain (Third-Party Action — Personal Namespace)
 **FILE:** `.github/.github/workflows/reusable-create-release.yaml` (line 16)
@@ -116,20 +111,15 @@ Pin all reusable workflow references to a specific commit SHA.
 **DESCRIPTION:**
 The release-creation workflow used by all 71 ACK controllers references `softprops/action-gh-release@v1` — a third-party action from a personal GitHub account pinned to a mutable tag. This action runs with `contents: write` permission and creates GitHub releases.
 
-**ATTACK SCENARIO:**
-1. If the `softprops` GitHub account is deleted/renamed, the namespace becomes claimable
-2. Attacker recreates the account and repo, publishes malicious action at the `v1` tag
-3. All ACK controller release workflows execute the attacker's code with write permissions
-
-**CODE PATH TRACE:**
-`{controller}/create-release.yml` → `reusable-create-release.yaml` → `softprops/action-gh-release@v1` (mutable tag, personal namespace) → `contents: write`
+**WHY MEDIUM, NOT HIGH:**
+`softprops` (Doug Tangren) has 473 repos, 957 followers, works at MongoDB Atlas, and is one of the most prominent GitHub Actions authors. `action-gh-release` has 5,513 stars and was last pushed 3 days ago. The account is extremely active and well-established. GitHub also has protections against re-registering recently-active usernames. The theoretical namespace-reclaim scenario is vanishingly unlikely for such an active account. The real risk is a mutable `@v1` tag (force-push attack if account is compromised), which requires compromising the account — not claiming an unclaimed resource.
 
 **REMEDIATION:**
 Pin to a specific SHA hash. Consider migrating to `ncipollo/release-action` or GitHub's built-in release API.
 
 ---
 
-### BUG #6 — SEVERITY: HIGH
+### BUG #6 — SEVERITY: MEDIUM (Downgraded from HIGH after validation)
 
 **VULNERABILITY CLASS:** GitHub Actions Supply Chain (Personal Namespace + `pull_request_target`)
 **FILES:**
@@ -139,22 +129,21 @@ Pin to a specific SHA hash. Consider migrating to `ncipollo/release-action` or G
 **VULNERABLE REFERENCE:** `thehanimo/pr-title-checker@v1.4.3`
 
 **DESCRIPTION:**
-Three Braket repos use `thehanimo/pr-title-checker` — a personal GitHub account's action — triggered by `pull_request_target` with `pull-requests: write` permissions and access to `secrets.GITHUB_TOKEN`. If the `thehanimo` account becomes claimable, an attacker can serve a malicious action that runs on every external PR.
+Three Braket repos use `thehanimo/pr-title-checker` — a personal GitHub account's action — triggered by `pull_request_target` with `pull-requests: write` permissions and access to `secrets.GITHUB_TOKEN`.
 
-**ATTACK SCENARIO:**
-1. `thehanimo` account is deleted or renamed, namespace becomes available
-2. Attacker registers `thehanimo` on GitHub, creates `pr-title-checker` repo with malicious action at `v1.4.3` tag
-3. Malicious action runs with `GITHUB_TOKEN` and `pull-requests: write` on every PR to these Braket repos
+**WHY MEDIUM, NOT HIGH:**
+Two factors limit the real-world exploitability:
+1. **Account still active**: `thehanimo` (Hani) exists with 62 repos and 35 followers. Account is smaller/less prominent than softprops, but still active. Namespace reclaim requires account deletion first.
+2. **Limited blast radius**: The workflow only grants `pull-requests: write` — NOT `contents: write`. Even if exploited, the attacker can only manipulate PR metadata (comments, approvals, labels), NOT modify code or create releases. No code execution in the repository itself.
 
-**CODE PATH TRACE:**
-External PR opened → `pull_request_target` trigger → `thehanimo/pr-title-checker@v1.4.3` → receives `secrets.GITHUB_TOKEN` with write permissions
+**The `pull_request_target` trigger is concerning in principle** (it runs in base branch context with elevated privileges), but this specific workflow does NOT checkout PR code — it only reads PR title metadata. The `@v1.4.3` pin is to a specific semver tag (not `@latest` or `@main`), which is slightly better than branch pinning.
 
 **REMEDIATION:**
-Pin to SHA hash, or replace with a maintained alternative. Remove `pull_request_target` trigger if not needed.
+Pin to SHA hash. Consider replacing with a maintained alternative or a simple regex check in a trusted inline script.
 
 ---
 
-### BUG #7 — SEVERITY: HIGH
+### BUG #7 — SEVERITY: MEDIUM (Downgraded from HIGH after validation)
 
 **VULNERABILITY CLASS:** GitHub Actions Supply Chain (Mutable `@latest` Tag)
 **FILES:**
@@ -163,7 +152,10 @@ Pin to SHA hash, or replace with a maintained alternative. Remove `pull_request_
 **VULNERABLE REFERENCE:** `julia-actions/julia-buildpkg@latest`
 
 **DESCRIPTION:**
-Five workflow steps reference `julia-actions/julia-buildpkg@latest`, which always resolves to the latest commit on the default branch. This is the most dangerous form of mutable pinning — any push to the `julia-actions` org's repo immediately executes in these workflows.
+Five workflow steps reference `julia-actions/julia-buildpkg@latest`, which always resolves to the latest commit on the default branch. This is the worst form of mutable pinning — any push to the `julia-actions` org's repo immediately executes in these workflows.
+
+**WHY MEDIUM, NOT HIGH:**
+`julia-actions` is an **organization** (not a personal account) with 35 repos and multiple maintainers, run by the Julia community. Exploitation requires compromising the org or a maintainer — not claiming an unclaimed resource. The `@latest` pin is the worst possible practice (worse than `@v1` or `@main`), but the attack surface is org compromise, same class as Bugs #3-5. These are CI workflows (not publish/release), so the blast radius is limited to CI test runs on Braket.jl and BraketAHS.jl.
 
 **ATTACK SCENARIO:**
 1. Attacker compromises the `julia-actions` org or a maintainer account
@@ -372,10 +364,10 @@ Remove `go.local.sum` files and add to `.gitignore`.
 │ #1  │ LOW      │ Unregistered PyPI name (acktest) — mitigated  │ 63+ controller test/e2e/requirements.txt │
 │ #2  │ LOW      │ Unregistered PyPI name (acktools) — mitigated │ community/docs/requirements.txt          │
 │ #3  │ HIGH     │ Mutable branch ref on PyPI publish action     │ 5 braket publish-to-pypi.yml             │
-│ #4  │ HIGH     │ Mutable branch ref on reusable workflows      │ 138 ACK controller workflow files         │
-│ #5  │ HIGH     │ Third-party action (personal namespace)       │ reusable-create-release.yaml             │
-│ #6  │ HIGH     │ Personal namespace + pull_request_target       │ 3 braket pr-title-checker.yml            │
-│ #7  │ HIGH     │ Mutable @latest tag on CI action              │ Braket.jl, BraketAHS.jl CI.yml           │
+│ #4  │ MEDIUM   │ Mutable branch ref on reusable workflows      │ 138 ACK controller workflow files         │
+│ #5  │ MEDIUM   │ Third-party action (personal namespace)       │ reusable-create-release.yaml             │
+│ #6  │ MEDIUM   │ Personal namespace + pull_request_target       │ 3 braket pr-title-checker.yml            │
+│ #7  │ MEDIUM   │ Mutable @latest tag on CI action              │ Braket.jl, BraketAHS.jl CI.yml           │
 │ #8  │ HIGH     │ Unregistered npm package (ack-community-docs) │ community/docs/package.json              │
 │ #9  │ HIGH     │ Unregistered PyPI package (ack-codegen-agent) │ test-infra pyproject.toml                │
 │ #10 │ HIGH     │ Personal GitHub fork dependency               │ sqs-controller test/e2e/requirements.txt │
@@ -389,7 +381,7 @@ Remove `go.local.sum` files and add to `.gitignore`.
 └─────┴──────────┴──────────────────────────────────────────────┴──────────────────────────────────────────┘
 
 TOTAL: 17 validated findings
-CRITICAL: 0 | HIGH: 8 | MEDIUM: 5 | LOW: 4
+CRITICAL: 0 | HIGH: 4 | MEDIUM: 9 | LOW: 4
 ```
 
 ## Areas Found Clean (No Issues)
