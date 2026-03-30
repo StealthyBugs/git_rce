@@ -22,61 +22,41 @@
 
 ---
 
-### BUG #1 — SEVERITY: CRITICAL
+### BUG #1 — SEVERITY: LOW (Downgraded from CRITICAL after validation)
 
-**VULNERABILITY CLASS:** Classic Dependency Confusion (Unregistered PyPI Package)
+**VULNERABILITY CLASS:** Classic Dependency Confusion (Unregistered PyPI Package — Mitigated by PEP 440 Direct References)
 **FILE:** 63+ files: `{controller}/test/e2e/requirements.txt` (line 1 in each)
 **VULNERABLE REFERENCE:** `acktest` (package name not registered on PyPI)
 
 **DESCRIPTION:**
-The package name `acktest` does NOT exist on PyPI (confirmed 404). It is referenced across 63+ ACK controller repositories. An attacker can register `acktest` on PyPI with a malicious payload containing a postinstall hook that executes arbitrary code.
+The package name `acktest` does NOT exist on PyPI (confirmed 404). It is referenced across 63+ ACK controller repositories. However, **every single reference** uses PEP 440 direct reference syntax (`acktest @ git+https://github.com/aws-controllers-k8s/test-infra.git@<commit-sha>`), which is a hard binding — pip will always fetch from the git URL and will **never fall back to PyPI**. This was confirmed by tracing all install paths (Dockerfile.pytest-image, soak/Dockerfile, build-docs.sh).
 
-**ATTACK SCENARIO:**
-1. Attacker registers `acktest` on PyPI with a malicious `setup.py` containing a `postinstall` script
-2. Any developer who runs `pip install acktest` (without the full git URL) gets the attacker's package
-3. Any CI environment where the git URL resolution fails falls back to PyPI resolution
-4. Any future project that adds `acktest` as a plain dependency (without `@ git+https://...`) installs the attacker's version
-
-**CODE PATH TRACE:**
-`test-infra/setup.py` (defines name='acktest') → `{controller}/test/e2e/requirements.txt` (references it) → `pip install -r requirements.txt` (in CI/dev environments)
-
-**PRODUCTION REACHABILITY:**
-While current references use `@ git+https://...` syntax which pins to git, the unregistered name is a standing vulnerability. The package runs in CI environments with access to AWS credentials and source code.
-
-**WHY THIS IS VALID:**
-Attacker simply registers `acktest` on PyPI — no privileged access required. Pure external action.
+**ACTUAL RISK:**
+The only exploitation path is social engineering: a developer who sees `acktest` in the codebase and independently runs `pip install acktest`. The current CI/build pipelines are NOT vulnerable through this vector.
 
 **REMEDIATION:**
-Register `acktest` as a placeholder on PyPI owned by the aws-controllers-k8s org. Add `"Private :: Do Not Upload"` classifier if not intended for public distribution.
+Register `acktest` as a defensive placeholder on PyPI to prevent social engineering attacks. This is best practice but not urgent.
 
 ---
 
-### BUG #2 — SEVERITY: CRITICAL
+### BUG #2 — SEVERITY: LOW (Downgraded from CRITICAL after validation)
 
-**VULNERABILITY CLASS:** Classic Dependency Confusion (Unregistered PyPI Package)
+**VULNERABILITY CLASS:** Classic Dependency Confusion (Unregistered PyPI Package — Mitigated by PEP 440 Direct References)
 **FILE:** `community/docs/requirements.txt` (line 1)
 **VULNERABLE REFERENCE:** `acktools` (package name not registered on PyPI)
 
 **DESCRIPTION:**
-The package name `acktools` does NOT exist on PyPI (confirmed 404). It is defined in `test-infra/tools/setup.py` and referenced with a git URL in the community docs build.
+The package name `acktools` does NOT exist on PyPI (confirmed 404). It is defined in `test-infra/tools/setup.py` and referenced in `community/docs/requirements.txt`. However, the reference uses PEP 440 direct reference syntax (`acktools @ git+https://...@<commit-sha>#subdirectory=tools`), which means pip will always fetch from the git URL and will **never query PyPI**.
 
-**ATTACK SCENARIO:**
-1. Attacker registers `acktools` on PyPI with malicious code
-2. Any developer or CI that runs `pip install acktools` by name gets the attacker's package
-3. The community docs build pipeline could be poisoned if git URL resolution fails
-
-**CODE PATH TRACE:**
-`test-infra/tools/setup.py` (defines name='acktools') → `community/docs/requirements.txt:1` → docs build pipeline
-
-**WHY THIS IS VALID:**
-Attacker registers on PyPI — purely external action, no privileged access.
+**ACTUAL RISK:**
+Same as #1 — social engineering only. The `build-docs.sh` CI script runs `pip install -r requirements.txt` which will use the git URL, not PyPI.
 
 **REMEDIATION:**
-Register `acktools` as a placeholder on PyPI.
+Register `acktools` as a defensive placeholder on PyPI.
 
 ---
 
-### BUG #3 — SEVERITY: CRITICAL
+### BUG #3 — SEVERITY: HIGH (Downgraded from CRITICAL after validation)
 
 **VULNERABILITY CLASS:** GitHub Actions Supply Chain (Mutable Branch Reference on Publish Workflow)
 **FILES:**
@@ -88,21 +68,16 @@ Register `acktools` as a placeholder on PyPI.
 **VULNERABLE REFERENCE:** `pypa/gh-action-pypi-publish@release/v1`
 
 **DESCRIPTION:**
-Five Braket PyPI publish workflows reference `pypa/gh-action-pypi-publish` pinned to the mutable branch `release/v1` instead of a SHA hash. These workflows have `id-token: write` permission for OIDC-based PyPI publishing. A compromise of this branch would allow intercepting the OIDC token and publishing malicious packages to PyPI.
+Five Braket PyPI publish workflows reference `pypa/gh-action-pypi-publish` pinned to the mutable branch `release/v1` instead of a SHA hash. These workflows have `id-token: write` permission for OIDC-based PyPI publishing.
 
-**ATTACK SCENARIO:**
-1. Attacker compromises the `pypa/gh-action-pypi-publish` repo (or a maintainer account) and pushes to the `release/v1` branch
-2. On next Braket release, the compromised action runs with OIDC token write access
-3. Attacker publishes backdoored versions of `amazon-braket-sdk`, `amazon-braket-schemas`, etc. to PyPI
+**WHY THIS IS HIGH, NOT CRITICAL:**
+The `pypa` (Python Packaging Authority) GitHub org is one of the most well-secured open source organizations — they maintain pip, setuptools, and PyPI itself. Exploitation requires compromising the pypa org or a maintainer account with push access to the `release/v1` branch. This is NOT the same as "registering an unclaimed resource" — it requires compromising an established, actively maintained project. However, it IS a real supply chain hygiene gap: 3 sibling Braket repos already correctly SHA-pin to `@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e`, proving the fix is known and easy.
 
 **CODE PATH TRACE:**
 `publish-to-pypi.yml` → `pypa/gh-action-pypi-publish@release/v1` (mutable) → OIDC token → PyPI publish
 
 **PRODUCTION REACHABILITY:**
 Triggered on every GitHub release publication. These are the actual production package publishing workflows.
-
-**WHY THIS IS VALID:**
-Three other Braket repos already correctly SHA-pin this same action to `@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e`, proving the fix is known. The mutable branch ref is the vulnerability.
 
 **REMEDIATION:**
 Pin to SHA: `pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e`
@@ -394,9 +369,9 @@ Remove `go.local.sum` files and add to `.gitignore`.
 ┌─────┬──────────┬──────────────────────────────────────────────┬──────────────────────────────────────────┐
 │ Bug │ Severity │ Vulnerability Class                          │ File(s)                                  │
 ├─────┼──────────┼──────────────────────────────────────────────┼──────────────────────────────────────────┤
-│ #1  │ CRITICAL │ Unregistered PyPI package (acktest)           │ 63+ controller test/e2e/requirements.txt │
-│ #2  │ CRITICAL │ Unregistered PyPI package (acktools)          │ community/docs/requirements.txt          │
-│ #3  │ CRITICAL │ Mutable branch ref on PyPI publish action     │ 5 braket publish-to-pypi.yml             │
+│ #1  │ LOW      │ Unregistered PyPI name (acktest) — mitigated  │ 63+ controller test/e2e/requirements.txt │
+│ #2  │ LOW      │ Unregistered PyPI name (acktools) — mitigated │ community/docs/requirements.txt          │
+│ #3  │ HIGH     │ Mutable branch ref on PyPI publish action     │ 5 braket publish-to-pypi.yml             │
 │ #4  │ HIGH     │ Mutable branch ref on reusable workflows      │ 138 ACK controller workflow files         │
 │ #5  │ HIGH     │ Third-party action (personal namespace)       │ reusable-create-release.yaml             │
 │ #6  │ HIGH     │ Personal namespace + pull_request_target       │ 3 braket pr-title-checker.yml            │
@@ -414,7 +389,7 @@ Remove `go.local.sum` files and add to `.gitignore`.
 └─────┴──────────┴──────────────────────────────────────────────┴──────────────────────────────────────────┘
 
 TOTAL: 17 validated findings
-CRITICAL: 3 | HIGH: 7 | MEDIUM: 5 | LOW: 2
+CRITICAL: 0 | HIGH: 8 | MEDIUM: 5 | LOW: 4
 ```
 
 ## Areas Found Clean (No Issues)
