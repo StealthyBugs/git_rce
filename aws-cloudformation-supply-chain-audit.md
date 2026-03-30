@@ -46,39 +46,35 @@
 
 ## Validated Findings
 
-### BUG #1 -- CRITICAL: Unregistered npm Package Name "cfn-guard"
+### BUG #1 -- MEDIUM (Revised from CRITICAL): Unregistered npm Package Name "cfn-guard"
 
-- **Vulnerability Class:** Dependency Confusion / Unregistered Package Name
+- **Vulnerability Class:** Name Squatting / Unregistered Package Name
 - **File:** `cloudformation-guard/guard/package.json`, line 2
 - **Also:** `cloudformation-guard/guard/ts-lib/package.json`, line 2
 - **Vulnerable Reference:** `"name": "cfn-guard"` (npm registry returns HTTP 404)
 
 **Description:**
-The package is named "cfn-guard" on npm but this name is NOT registered on the public npm registry (confirmed HTTP 404). No `"private": true` is set. This package is actively consumed as a dependency by other repos in the org.
+The package is named "cfn-guard" on npm but this name is NOT registered on the public npm registry (confirmed HTTP 404). No `"private": true` is set. However, current consumers use URL or file: specifiers that do NOT fall back to the npm registry.
+
+**Exploitability Analysis:**
+- `action/package.json:80` consumes via URL specifier (`https://gitpkg.now.sh/...`) -- npm resolves the URL directly, NOT the npm registry. **Not vulnerable to classic dependency confusion.**
+- `cloudformation-languageserver/package.json:70` consumes via `file:./vendor/cfn-guard` -- local path. **Not vulnerable.**
+- The real risk is **name squatting**: an attacker registers "cfn-guard" on npm, and anyone who independently runs `npm install cfn-guard` (e.g., following docs or searching npm) gets the attacker's package.
+- Missing `"private": true` also means accidental `npm publish` could succeed if the attacker hasn't claimed the name first.
 
 **Attack Scenario:**
-1. Attacker registers "cfn-guard" on npmjs.com
-2. Publishes version 99.0.0 with a postinstall script containing malicious code
-3. Any developer/CI running `npm install cfn-guard` by name, or any resolver that falls back to the public registry, pulls the attacker's package
-4. The postinstall script executes automatically, achieving RCE
-
-**Code Path Trace:**
-- `guard/package.json` (name: cfn-guard, no private:true)
-- -> `action/package.json:80` (consumed via gitpkg URL)
-- -> `cloudformation-languageserver/package.json:70` (consumed via `file:./vendor/cfn-guard`)
-- -> `guard/ts-lib/package.json` (also named cfn-guard, also no private:true)
-
-**Production Reachability:**
-This package is consumed by the cloudformation-guard GitHub Action and the cloudformation-languageserver. Direct npm install by name hits the public registry.
+1. Attacker registers "cfn-guard" on npmjs.com with malicious postinstall script
+2. Users searching npm for the cfn-guard tool install the attacker's package
+3. Postinstall executes, achieving RCE on the developer's machine
 
 **Remediation:**
-1. Immediately register "cfn-guard" on npm as a placeholder
+1. Register "cfn-guard" on npm defensively as a placeholder
 2. Add `"private": true` to guard/package.json and guard/ts-lib/package.json
 3. Consider using a scoped name: `@aws-cloudformation/cfn-guard`
 
 ---
 
-### BUG #2 -- CRITICAL: Third-Party Proxy Service Dependency (gitpkg.now.sh)
+### BUG #2 -- HIGH (Revised from CRITICAL): Third-Party Proxy Service Dependency (gitpkg.now.sh)
 
 - **Vulnerability Class:** Third-Party Proxy Service Dependency
 - **File:** `cloudformation-guard/action/package.json`, line 80
@@ -87,22 +83,26 @@ This package is consumed by the cloudformation-guard GitHub Action and the cloud
 **Description:**
 The cfn-guard dependency in the GitHub Action is fetched via gitpkg.now.sh, a third-party service (redirects to gitpkg.vercel.app) operated by an individual developer. This creates a single point of failure external to both npm and GitHub.
 
-**Attack Scenario:**
-1. gitpkg.now.sh/gitpkg.vercel.app service is compromised, sold, or domain lapses
-2. Attacker takes control of the domain/service
-3. Service returns a malicious tarball instead of the real package
-4. Every `npm install` in the cloudformation-guard action pulls attacker code
-5. The action runs in CI with GITHUB_TOKEN and potentially other secrets
+**Exploitability Analysis:**
+The lockfile (`action/package-lock.json:3067`) contains an `integrity` hash (`sha512-ihSpq...`). When `npm install` runs with the lockfile present, npm verifies the downloaded tarball against this hash. If gitpkg is compromised and serves different content, the hash check **fails and installation errors out**. This provides defense-in-depth.
 
-**Code Path Trace:**
-- `action/package.json:80` -> npm resolver -> gitpkg.now.sh proxy
-- -> `action/package-lock.json:3067` (resolved URL)
-- -> npm install -> node_modules/cfn-guard -> action execution
+However, the risk materializes when:
+- A developer deletes the lockfile and runs `npm install` (fresh resolution, no hash check)
+- The dependency is upgraded and the lockfile is regenerated (new hash from compromised source)
+- The CI uses `npm install` (action-ci.yml:22) rather than `npm ci --frozen-lockfile`
+
+**Attack Scenario:**
+1. gitpkg.now.sh/gitpkg.vercel.app service is compromised or domain lapses
+2. Attacker takes control of the domain/service
+3. During a lockfile regeneration, npm fetches a malicious tarball
+4. New lockfile is committed with the attacker's integrity hash
+5. All subsequent CI runs execute attacker code
 
 **Remediation:**
 1. Vendor the cfn-guard ts-lib directly into the action directory
 2. Or publish to npm under a scoped name and reference that instead
 3. Or use a git submodule/subtree instead of a proxy service
+4. Switch CI from `npm install` to `npm ci --frozen-lockfile`
 
 ---
 
@@ -367,8 +367,8 @@ Remove default values for S3 bucket parameters or use clearly-marked placeholder
 
 | Bug | Severity | Vulnerability Class | File(s) |
 |-----|----------|---------------------|---------|
-| #1  | CRITICAL | Unregistered npm package: cfn-guard | cloudformation-guard/guard/package.json |
-| #2  | CRITICAL | Third-party proxy service dependency | cloudformation-guard/action/package.json |
+| #1  | MEDIUM   | Unregistered npm package: cfn-guard (name squat) | cloudformation-guard/guard/package.json |
+| #2  | HIGH     | Third-party proxy service dependency | cloudformation-guard/action/package.json |
 | #3  | HIGH     | Unregistered npm package: vscode-cfn-lint | cfn-lint-visual-studio-code/*.json |
 | #4  | HIGH     | Unregistered npm package: guard-rail-vscode | resource-schema-guard-rail/vscode-extension/package.json |
 | #5  | HIGH     | Unregistered npm package: atom-cfn-lint | cfn-lint-atom/package.json |
@@ -386,7 +386,7 @@ Remove default values for S3 bucket parameters or use clearly-marked placeholder
 | #17 | MEDIUM   | Generic S3 bucket name defaults | aws-cloudformation-templates/EMR/*.yaml |
 
 **TOTAL: 17 validated findings**
-**CRITICAL: 2 | HIGH: 8 | MEDIUM: 7**
+**CRITICAL: 0 | HIGH: 9 | MEDIUM: 8**
 
 ---
 
