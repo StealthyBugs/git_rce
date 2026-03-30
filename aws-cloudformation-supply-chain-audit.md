@@ -106,78 +106,77 @@ However, the risk materializes when:
 
 ---
 
-### BUG #3 -- HIGH: Unregistered npm Package Name "vscode-cfn-lint"
+### BUG #3 -- LOW (Revised from HIGH): Unregistered npm Package Name "vscode-cfn-lint"
 
-- **Vulnerability Class:** Dependency Confusion / Unregistered Package Name
+- **Vulnerability Class:** Name Squatting (Hygiene Issue)
 - **Files:** `cfn-lint-visual-studio-code/package.json`, `server/package.json`, `client/package.json` (all line 2)
 - **Vulnerable Reference:** `"name": "vscode-cfn-lint"` (npm registry returns HTTP 404)
 
 **Description:**
-Three package.json files use the name "vscode-cfn-lint" which does not exist on npm (HTTP 404). None have `"private": true`. The root package.json has a postinstall script (line 58) that runs `npm install` in server/ and client/ subdirectories.
+Three package.json files use the name "vscode-cfn-lint" which does not exist on npm (HTTP 404). None have `"private": true`.
 
-**Attack Scenario:**
-1. Attacker registers "vscode-cfn-lint" on npm
-2. Root package.json has `postinstall: "cd server && npm install && cd ../client && npm install"`
-3. Any user running `npm install vscode-cfn-lint` gets attacker's code with automatic postinstall execution
+**Exploitability Analysis (Revised):**
+This is a **VS Code extension** (`"engines": {"vscode": "^1.52.0"}`, `"publisher": "kddejong"`), distributed via the VS Code Marketplace, NOT npm. Nobody runs `npm install vscode-cfn-lint`. The `name` field identifies the extension for VS Code packaging. The postinstall script installs subdirectory dependencies — npm never resolves `vscode-cfn-lint` from the registry. **Not practically exploitable.**
 
 **Remediation:**
-1. Register "vscode-cfn-lint" on npm defensively
-2. Add `"private": true` to all three package.json files
+Add `"private": true` to all three package.json files (hygiene fix).
 
 ---
 
-### BUG #4 -- HIGH: Unregistered npm Package Name "guard-rail-vscode"
+### BUG #4 -- LOW (Revised from HIGH): Unregistered npm Package Name "guard-rail-vscode"
 
-- **Vulnerability Class:** Dependency Confusion / Unregistered Package Name
+- **Vulnerability Class:** Name Squatting (Hygiene Issue)
 - **File:** `resource-schema-guard-rail/vscode-extension/package.json`, line 2
 - **Vulnerable Reference:** `"name": "guard-rail-vscode"` (npm registry returns HTTP 404)
 
 **Description:**
-Package named "guard-rail-vscode" does not exist on npm (HTTP 404). No `"private": true` set. Unscoped name claimable by any attacker.
+Package named "guard-rail-vscode" does not exist on npm (HTTP 404). No `"private": true` set.
+
+**Exploitability Analysis (Revised):**
+This is a **VS Code extension** (`"engines": {"vscode": "^1.80.0"}`, `"publisher": "guard-rail"`), distributed via VS Code Marketplace. No npm install path exists. **Not practically exploitable.**
 
 **Remediation:**
-1. Add `"private": true` to package.json
-2. Register the name defensively on npm
+Add `"private": true` to package.json (hygiene fix).
 
 ---
 
-### BUG #5 -- HIGH: Unregistered npm Package Name "atom-cfn-lint"
+### BUG #5 -- LOW (Revised from HIGH): Unregistered npm Package Name "atom-cfn-lint"
 
-- **Vulnerability Class:** Dependency Confusion / Unregistered Package Name
+- **Vulnerability Class:** Name Squatting (Hygiene Issue)
 - **File:** `cfn-lint-atom/package.json`, line 2
 - **Vulnerable Reference:** `"name": "atom-cfn-lint"` (npm registry returns HTTP 404)
 
 **Description:**
-Package named "atom-cfn-lint" does not exist on npm (HTTP 404). No `"private": true`. The Atom editor is discontinued, but the package and Travis CI config are still active.
+Package named "atom-cfn-lint" does not exist on npm (HTTP 404). No `"private": true`.
+
+**Exploitability Analysis (Revised):**
+This is an **Atom editor package** (`"engines": {"atom": ">=1.0.0 <2.0.0"}`). Atom was discontinued Dec 2022. Packages were installed via `apm` (Atom's own registry, not npm). The apm infrastructure is defunct. Zero user base. **Not practically exploitable.**
 
 **Remediation:**
-1. Add `"private": true` to package.json
-2. Archive the repository since Atom is discontinued
+Archive the repository since Atom is discontinued.
 
 ---
 
-### BUG #6 -- HIGH: Unpinned GitHub Action on Master Branch (crate-ci/typos)
+### BUG #6 -- LOW (Revised from HIGH): Unpinned GitHub Action on Master Branch (crate-ci/typos)
 
-- **Vulnerability Class:** GitHub Actions Supply Chain
+- **Vulnerability Class:** GitHub Actions Hygiene
 - **File:** `cloudformation-guard/.github/workflows/pr.yml`, line 100
 - **Vulnerable Reference:** `uses: crate-ci/typos@master`
 
 **Description:**
-GitHub Action pinned to "master" branch instead of a SHA hash or immutable tag. The master branch is a moving target -- any push to it immediately changes what code runs in CI.
+GitHub Action pinned to "master" branch instead of a SHA hash.
 
-**Attack Scenario:**
-1. Attacker compromises a crate-ci org member's GitHub account
-2. Pushes malicious code to master branch of typos repo
-3. All subsequent PR builds in cloudformation-guard execute the attacker's code with access to GITHUB_TOKEN and repo secrets
+**Exploitability Analysis (Revised):**
+crate-ci/typos has ~3,862 stars, was pushed to recently, and is actively maintained. Exploitation requires compromising a crate-ci maintainer account (nation-state level). On the `pull_request` trigger path (external PRs), the action has **no secrets access** and a read-only token. **Not practically exploitable by external attacker.**
 
 **Remediation:**
-Pin to a specific SHA: `uses: crate-ci/typos@<full-sha-hash>`
+Pin to a specific SHA (hygiene improvement).
 
 ---
 
-### BUG #7 -- HIGH: Curl-Pipe-Shell with Secrets in Scope
+### BUG #7 -- LOW (Revised from HIGH): Curl-Pipe-Shell with Secrets in Scope
 
-- **Vulnerability Class:** CI Pipeline Supply Chain
+- **Vulnerability Class:** CI Pipeline Hygiene (Requires Insider Access)
 - **Files:**
   - `aws-guard-rules-registry/.github/workflows/ci.yml`, lines 20, 28
   - `aws-guard-rules-registry/.github/workflows/build.yml`, lines 19, 27
@@ -185,23 +184,19 @@ Pin to a specific SHA: `uses: crate-ci/typos@<full-sha-hash>`
 - **Vulnerable Reference:** `curl ... https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/install-guard.sh | sh`
 
 **Description:**
-Six instances across three workflow files download and execute install-guard.sh from the main branch without integrity verification. The publish.yml workflow has AWS ECR credentials (ECR_AWS_ACCESS_KEY_ID, ECR_AWS_SECRET_ACCESS_KEY) in scope.
+Six instances across three workflow files download and execute install-guard.sh from the main branch.
 
-**Attack Scenario:**
-1. Attacker with write access to cloudformation-guard main branch modifies install-guard.sh
-2. All CI runs in aws-guard-rules-registry execute the modified script
-3. publish.yml runs with ECR credentials -- attacker exfiltrates them
+**Exploitability Analysis (Revised):**
+The script is fetched from **another repo in the same AWS org** (`aws-cloudformation/cloudformation-guard`). External attacker cannot modify it. The `publish.yml` with ECR credentials only triggers on **push to the `publish` branch** (requires write access). The `ci.yml` triggered by external PRs has **no secrets in scope**. **Requires insider access — not exploitable by external attacker.**
 
 **Remediation:**
-1. Pin to a specific commit SHA in the URL
-2. Download, verify checksum, then execute
-3. Or vendor the script locally
+Pin to a specific commit SHA in the URL (hygiene improvement).
 
 ---
 
-### BUG #8 -- HIGH: Remote Unpinned requirements.txt Install
+### BUG #8 -- LOW (Revised from HIGH): Remote Unpinned requirements.txt Install
 
-- **Vulnerability Class:** CI Pipeline Supply Chain
+- **Vulnerability Class:** CI Pipeline Hygiene (Requires Insider Access)
 - **Files:**
   - `cloudformation-cli-go-plugin/.github/workflows/pr-ci.yml`, line 39
   - `cloudformation-cli-python-plugin/.github/workflows/pr-ci.yml`, line 26
@@ -209,54 +204,48 @@ Six instances across three workflow files download and execute install-guard.sh 
 - **Vulnerable Reference:** `pip install -r https://raw.githubusercontent.com/aws-cloudformation/aws-cloudformation-rpdk/master/requirements.txt`
 
 **Description:**
-Three CI workflows install Python dependencies from a remote requirements.txt fetched from the master branch of another repo without lockfile or hash verification.
+Three CI workflows install Python dependencies from a remote requirements.txt from a sibling repo.
 
-**Attack Scenario:**
-1. Attacker with write access to cloudformation-cli adds a malicious package to requirements.txt
-2. All three downstream repos' CI pipelines install it on next run
+**Exploitability Analysis (Revised):**
+All requirements.txt URLs point to **sibling repos in the same `aws-cloudformation` org**. External attacker cannot modify them. CI workflows triggered by fork PRs have **no secrets** (TypeScript plugin uses the well-known AWS example key `AKIAIOSFODNN7EXAMPLE`). **Requires insider access — not exploitable by external attacker.**
 
 **Remediation:**
-1. Pin the URL to a specific commit SHA
-2. Or vendor a local copy of requirements.txt
-3. Use pip's `--require-hashes` for integrity verification
+Pin to specific commit SHA or vendor locally (hygiene improvement).
 
 ---
 
-### BUG #9 -- HIGH: Curl-Pipe-Shell for golangci-lint Installer
+### BUG #9 -- LOW (Revised from HIGH): Curl-Pipe-Shell for golangci-lint Installer
 
-- **Vulnerability Class:** CI Pipeline Supply Chain
+- **Vulnerability Class:** CI Pipeline Hygiene
 - **File:** `cloudformation-cli-go-plugin/.github/workflows/pr-ci.yml`, line 44
 - **Vulnerable Reference:** `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2`
 
 **Description:**
-The golangci-lint installer script is fetched from the master branch (mutable reference) and piped directly to sh. While the binary version is pinned (v1.55.2), the installer script itself is not integrity-verified.
+The golangci-lint installer script is fetched from the master branch and piped to sh.
+
+**Exploitability Analysis (Revised):**
+golangci-lint has **18,730 stars**, was pushed yesterday, and is one of the most popular Go tools. The install script **does checksum verification** of downloaded binaries. The version is pinned (`v1.55.2`). The CI runner has **no secrets**. Exploitation requires compromising a massively popular project (nation-state level). **Not practically exploitable.**
 
 **Remediation:**
-1. Use the official golangci-lint GitHub Action (pinned to SHA) instead
-2. Or download the script at a pinned commit with checksum verification
+Use the official golangci-lint GitHub Action pinned to SHA (hygiene improvement).
 
 ---
 
-### BUG #10 -- HIGH: Hardcoded S3 Bucket for Lambda Code Source
+### BUG #10 -- LOW (Revised from HIGH): Hardcoded S3 Bucket for Lambda Code Source
 
-- **Vulnerability Class:** Infrastructure Takeover
+- **Vulnerability Class:** Infrastructure Hygiene
 - **File:** `aws-cloudformation-templates/Solutions/WebApp/webapp.yaml`, lines 12, 716
 - **Also:** `aws-cloudformation-templates/Solutions/WebApp/webapp.json`, lines 12, 1295-1296
 - **Vulnerable Reference:** `S3Bucket: rain-artifacts-207567786752-us-east-1`
 
 **Description:**
-A CloudFormation template hardcodes a specific S3 bucket (including an AWS account ID) as the default source for Lambda function code. If this bucket is ever deleted, the name becomes globally claimable by any AWS account.
+A CloudFormation sample template hardcodes an S3 bucket as the default source for Lambda code.
 
-**Attack Scenario:**
-1. The account 207567786752 owner deletes the bucket
-2. Attacker creates bucket with same name in their own account
-3. Uploads malicious Lambda code with the expected S3 key
-4. Any user deploying this template with default parameters gets attacker's code running as a Lambda function
+**Exploitability Analysis (Revised):**
+The bucket **currently exists** and is owned by an active AWS account (Rain project maintainer). The template is explicitly a **sample** ("Adapt this template to your needs and thoroughly test it"). No reasonable user deploys this unmodified — it creates a full web app requiring custom business logic. The attack requires the bucket owner to delete it first (extremely unlikely for an active AWS team). Note: line 716 hardcodes the bucket instead of referencing the parameter (line 635 uses `!Ref`) — this is a **code quality bug**, not a security vulnerability. **Not practically exploitable.**
 
 **Remediation:**
-1. Remove the hardcoded bucket reference
-2. Require users to provide their own S3 bucket (no default)
-3. Or use inline code / SAM packaging
+Fix line 716 to use `!Ref LambdaCodeS3Bucket` instead of hardcoding (code quality fix).
 
 ---
 
@@ -369,14 +358,14 @@ Remove default values for S3 bucket parameters or use clearly-marked placeholder
 |-----|----------|---------------------|---------|
 | #1  | MEDIUM   | Unregistered npm package: cfn-guard (name squat) | cloudformation-guard/guard/package.json |
 | #2  | HIGH     | Third-party proxy service dependency | cloudformation-guard/action/package.json |
-| #3  | HIGH     | Unregistered npm package: vscode-cfn-lint | cfn-lint-visual-studio-code/*.json |
-| #4  | HIGH     | Unregistered npm package: guard-rail-vscode | resource-schema-guard-rail/vscode-extension/package.json |
-| #5  | HIGH     | Unregistered npm package: atom-cfn-lint | cfn-lint-atom/package.json |
-| #6  | HIGH     | Unpinned GH Action (master branch) | cloudformation-guard/.github/workflows/pr.yml |
-| #7  | HIGH     | Curl-pipe-sh with secrets in scope | aws-guard-rules-registry/.github/workflows/*.yml |
-| #8  | HIGH     | Remote unpinned requirements.txt install | 3 repos' .github/workflows/pr-ci.yml |
-| #9  | HIGH     | Curl-pipe-sh for golangci-lint installer | cloudformation-cli-go-plugin/.github/workflows/pr-ci |
-| #10 | HIGH     | Hardcoded S3 bucket for Lambda code | aws-cloudformation-templates/Solutions/WebApp/webapp |
+| #3  | LOW      | VS Code ext name not on npm (hygiene) | cfn-lint-visual-studio-code/*.json |
+| #4  | LOW      | VS Code ext name not on npm (hygiene) | resource-schema-guard-rail/vscode-extension/package.json |
+| #5  | LOW      | Atom pkg name not on npm (discontinued) | cfn-lint-atom/package.json |
+| #6  | LOW      | Unpinned GH Action (well-maintained) | cloudformation-guard/.github/workflows/pr.yml |
+| #7  | LOW      | Curl-pipe-sh (requires insider access) | aws-guard-rules-registry/.github/workflows/*.yml |
+| #8  | LOW      | Remote requirements.txt (requires insider) | 3 repos' .github/workflows/pr-ci.yml |
+| #9  | LOW      | Curl-pipe-sh (well-maintained, no secrets) | cloudformation-cli-go-plugin/.github/workflows/pr-ci |
+| #10 | LOW      | Hardcoded S3 bucket (sample template) | aws-cloudformation-templates/Solutions/WebApp/webapp |
 | #11 | MEDIUM   | Unmaintained GH Action (actions-rs) | cloudformation-guard/.github/workflows/pr.yml |
 | #12 | MEDIUM   | Deprecated codecov bash uploader | cloudformation-cli-typescript-plugin/.github/wf/ci |
 | #13 | MEDIUM   | Archived repo CI script download | cfn-lint-atom/.travis.yml |
@@ -385,8 +374,10 @@ Remove default values for S3 bucket parameters or use clearly-marked placeholder
 | #16 | MEDIUM   | Unpinned cross-repo schema fetch | cloudformation-cli/.github/workflows/schema-updater |
 | #17 | MEDIUM   | Generic S3 bucket name defaults | aws-cloudformation-templates/EMR/*.yaml |
 
-**TOTAL: 17 validated findings**
-**CRITICAL: 0 | HIGH: 9 | MEDIUM: 8**
+**TOTAL: 17 findings**
+**HIGH: 1 | MEDIUM: 8 | LOW: 8**
+
+**Note:** After deep exploitability analysis, most originally-HIGH findings were downgraded. Bugs #3-#5 are VS Code/Atom extensions not distributed via npm. Bugs #6-#9 require insider access or compromising massively popular projects. Bug #10 is a sample template with an active bucket. Only Bug #2 (gitpkg.now.sh third-party proxy) remains HIGH due to genuine external single-point-of-failure risk.
 
 ---
 
