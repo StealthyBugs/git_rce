@@ -108,6 +108,29 @@ The `name` field in `package.json` is only metadata for what the package would b
 
 ---
 
+### BUG #2b — MEDIUM — curl|sh in action.yml (astral.sh/uv)
+
+- **File:** `aws-actions/application-observability-for-aws/action.yml` (line 151)
+- **Reference:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+The action's runtime pipes a remote script from `astral.sh` directly to shell without any integrity verification. This runs during every workflow execution that triggers the MCP tools install path. While `astral.sh` is a legitimate domain (the uv Python package manager), the mutable URL means any change to that script is silently consumed.
+
+**Exploitability:** Conditional — requires compromise of astral.sh or its CDN. The domain is actively maintained.
+
+---
+
+### BUG #2c — MEDIUM — Unpinned third-party action (@beta tag)
+
+- **File:** `aws-actions/application-observability-for-aws/.github/workflows/integ-test.yml` (line 40)
+- **Also:** `aws-actions/application-observability-for-aws/.github/workflows/canary-test.yml` (line 39)
+- **Reference:** `uses: anthropics/claude-code-base-action@beta`
+
+Uses the `@beta` mutable tag for the Claude Code action. This action receives AWS Bedrock model access, MCP server configurations, and prompt files. A tag retarget could inject modified action code.
+
+**Exploitability:** Conditional — requires compromise of the anthropics GitHub org or a tag retarget. The org is well-established.
+
+---
+
 ## Remaining Findings (Bugs #15–#22, unchanged)
 
 These findings were not part of the exploitability re-verification but remain as originally assessed:
@@ -163,6 +186,6 @@ These findings were not part of the exploitability re-verification but remain as
 | #22 | LOW | No | Stale Dockerfile | amazon-eks-fargate Dockerfile |
 
 **CONFIRMED EXPLOITABLE: 2 findings (Bug #1, Bug #2)**
-**CONDITIONALLY EXPLOITABLE: 7 findings (Bugs #15-#21) — require upstream account compromise or specific conditions**
+**CONDITIONALLY EXPLOITABLE: 9 findings (Bugs #2b, #2c, #15-#21) — require upstream account compromise or specific conditions**
 **INFORMATIONAL: 12 findings (Bugs #3-#14) — namespace hygiene, not exploitable**
 **LOW: 1 finding (Bug #22)**
