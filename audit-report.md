@@ -167,42 +167,39 @@ Pin to a specific SHA hash.
 
 ---
 
-### BUG #8 — SEVERITY: HIGH
+### BUG #8 — SEVERITY: LOW (Downgraded from HIGH after validation)
 
-**VULNERABILITY CLASS:** Dependency Confusion (Unregistered npm Package with Public Publish Config)
+**VULNERABILITY CLASS:** Unregistered npm Package Name (Project Identity Only — Not a Dependency)
 **FILE:** `community/docs/package.json` (lines 2, 10-12)
 **VULNERABLE REFERENCE:** `ack-community-docs` (not registered on npm)
 
 **DESCRIPTION:**
-The package is named `ack-community-docs` with `"publishConfig": {"access": "public"}` but is NOT registered on npm (confirmed 404). It also lacks `"private": true`. An attacker could register this name on npm.
+The package is named `ack-community-docs` with `"publishConfig": {"access": "public"}` and no `"private": true`. The name is NOT registered on npm.
 
-**ATTACK SCENARIO:**
-1. Attacker registers `ack-community-docs` on npm with a malicious `postinstall` script
-2. Any environment that runs `npm install ack-community-docs` by name gets the attacker's package
+**WHY LOW, NOT HIGH:**
+`ack-community-docs` is the project's own `"name"` field — NOT a dependency of anything. It does not appear in `dependencies` or `devDependencies` of any package.json in the codebase. No code runs `npm install ack-community-docs` by name. When `build-docs.sh` runs `npm install`, it installs devDependencies (babel, bootstrap, hugo-installer, etc.) — not the project's own name. A `package-lock.json` (lockfileVersion 2) is present and pins all actual dependencies to `registry.npmjs.org`. An attacker registering this name on npm accomplishes nothing against this codebase.
 
-**CODE PATH TRACE:**
-`community/docs/package.json` (name: "ack-community-docs") → npm registry (unregistered)
+The missing `"private": true` is an internal hygiene issue (prevents accidental `npm publish`), not an external attack vector.
 
 **REMEDIATION:**
-Add `"private": true` to package.json (as done in `docs/website/package.json`), or register the name on npm as a placeholder.
+Add `"private": true` to package.json for hygiene (as done in `docs/website/package.json`).
 
 ---
 
-### BUG #9 — SEVERITY: HIGH
+### BUG #9 — SEVERITY: LOW (Downgraded from HIGH after validation)
 
-**VULNERABILITY CLASS:** Dependency Confusion (Unregistered PyPI Package)
+**VULNERABILITY CLASS:** Unregistered PyPI Package Name (Project Identity Only — Not a Dependency)
 **FILE:** `test-infra/prow/agent-workflows/agents/pyproject.toml` (line 6)
 **VULNERABLE REFERENCE:** `ack-codegen-agent` (not registered on PyPI)
 
 **DESCRIPTION:**
-The package name `ack-codegen-agent` does NOT exist on PyPI (confirmed 404). It declares dependencies on `strands-agents`, `boto3`, `mcp`, etc. An attacker could register this name on PyPI.
+The package name `ack-codegen-agent` does NOT exist on PyPI (confirmed 404).
 
-**ATTACK SCENARIO:**
-1. Attacker registers `ack-codegen-agent` on PyPI
-2. Any developer or CI that runs `pip install ack-codegen-agent` by name gets the attacker's package
+**WHY LOW, NOT HIGH:**
+`ack-codegen-agent` is the project's own name — NOT a dependency of anything. It is not listed in any requirements.txt or other pyproject.toml. The project uses `uv` for dependency management with a `uv.lock` file that lists it as `source = { editable = "." }` (local directory). The Makefile runs `uv run --refresh python -m ack_builder_agent` (local invocation). The CI script (`prow-job.sh`) runs `python -m workflows resource-addition` (also local). No code anywhere runs `pip install ack-codegen-agent` by name. An attacker registering this on PyPI accomplishes nothing against this codebase.
 
 **REMEDIATION:**
-Register as placeholder on PyPI, or add `Private :: Do Not Upload` classifier.
+Defensive registration on PyPI is optional hygiene.
 
 ---
 
@@ -368,8 +365,8 @@ Remove `go.local.sum` files and add to `.gitignore`.
 │ #5  │ MEDIUM   │ Third-party action (personal namespace)       │ reusable-create-release.yaml             │
 │ #6  │ MEDIUM   │ Personal namespace + pull_request_target       │ 3 braket pr-title-checker.yml            │
 │ #7  │ MEDIUM   │ Mutable @latest tag on CI action              │ Braket.jl, BraketAHS.jl CI.yml           │
-│ #8  │ HIGH     │ Unregistered npm package (ack-community-docs) │ community/docs/package.json              │
-│ #9  │ HIGH     │ Unregistered PyPI package (ack-codegen-agent) │ test-infra pyproject.toml                │
+│ #8  │ LOW      │ Unregistered npm name (project, not dep)      │ community/docs/package.json              │
+│ #9  │ LOW      │ Unregistered PyPI name (project, not dep)     │ test-infra pyproject.toml                │
 │ #10 │ HIGH     │ Personal GitHub fork dependency               │ sqs-controller test/e2e/requirements.txt │
 │ #11 │ MEDIUM   │ S3 bucket takeover in Dockerfile              │ 3 braket-containers Dockerfiles          │
 │ #12 │ MEDIUM   │ Git deps pinned to @main in CI               │ 2 braket workflow files                  │
@@ -381,7 +378,7 @@ Remove `go.local.sum` files and add to `.gitignore`.
 └─────┴──────────┴──────────────────────────────────────────────┴──────────────────────────────────────────┘
 
 TOTAL: 17 validated findings
-CRITICAL: 0 | HIGH: 4 | MEDIUM: 9 | LOW: 4
+CRITICAL: 0 | HIGH: 2 | MEDIUM: 9 | LOW: 6
 ```
 
 ## Areas Found Clean (No Issues)
