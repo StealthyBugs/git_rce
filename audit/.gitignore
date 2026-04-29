@@ -1,0 +1,5 @@
+# Cloned source repos (public, large) — only the findings report is tracked
+*/
+!.gitignore
+!FINDINGS.md
+!manifest.txt
